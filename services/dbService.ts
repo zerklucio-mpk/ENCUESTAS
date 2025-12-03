@@ -42,7 +42,7 @@ export const saveSurveyToDb = async (data: SurveyData): Promise<boolean> => {
       .single();
 
     if (surveyError || !surveyResult) {
-      console.error('Error guardando encuesta:', surveyError);
+      console.error('Error guardando encuesta:', JSON.stringify(surveyError, null, 2));
       throw surveyError;
     }
 
@@ -68,7 +68,7 @@ export const saveSurveyToDb = async (data: SurveyData): Promise<boolean> => {
       .insert(answersToInsert);
 
     if (answersError) {
-      console.error('Error guardando respuestas:', answersError);
+      console.error('Error guardando respuestas:', JSON.stringify(answersError, null, 2));
       throw answersError;
     }
 
@@ -91,15 +91,21 @@ export const fetchHistoricalData = async () => {
     .select('*');
   
   if (error) {
-    console.error('Error cargando históricos:', error);
+    // Si la tabla no existe, retornamos objeto vacío sin hacer ruido
+    if (error.code === 'PGRST205') {
+      console.warn("Tabla 'historico_bimestral' no encontrada. Funcionalidad de histórico desactivada.");
+      return {};
+    }
+    console.error('Error cargando históricos:', JSON.stringify(error, null, 2));
     return {};
   }
 
-  const formatted: Record<string, { score: string, count: string }> = {};
+  const formatted: Record<string, { score: string, count: string, label?: string }> = {};
   data.forEach((row: any) => {
     formatted[row.area] = {
       score: row.score_anterior?.toString() || "",
-      count: row.count_anterior?.toString() || ""
+      count: row.count_anterior?.toString() || "",
+      label: row.periodo_label || "" // Recuperamos la etiqueta
     };
   });
   
@@ -108,26 +114,160 @@ export const fetchHistoricalData = async () => {
 
 /**
  * Guarda o actualiza un dato histórico
+ * Incluye lógica de fallback si la columna periodo_label no existe
  */
-export const upsertHistoricalData = async (area: string, score: string, count: string) => {
+export const upsertHistoricalData = async (area: string, score: string, count: string, periodoLabel: string = "") => {
   if (!isConfigured()) return;
 
-  // IMPORTANTE: Se agrega { onConflict: 'area' } para que Supabase sepa
-  // que debe usar la columna 'area' (que debe ser UNIQUE en la BD) para decidir si actualiza o inserta.
+  const basePayload = {
+    area,
+    score_anterior: parseFloat(score) || 0,
+    count_anterior: parseInt(count) || 0,
+    updated_at: new Date().toISOString()
+  };
+
+  // Intentamos guardar con la etiqueta
   const { error } = await supabase
     .from('historico_bimestral')
     .upsert({
-      area,
-      score_anterior: parseFloat(score) || 0,
-      count_anterior: parseInt(count) || 0,
-      updated_at: new Date().toISOString()
+      ...basePayload,
+      periodo_label: periodoLabel, // Intentamos guardar la etiqueta
     }, { onConflict: 'area' });
   
   if (error) {
-    // Usamos JSON.stringify para ver el mensaje real del objeto error
+    // Manejo de errores de esquema (Columna no existe o caché desactualizada)
+    // PGRST204: Column not found in schema cache
+    // 42703: Undefined column
+    if (error.code === 'PGRST204' || error.code === '42703') {
+       console.warn(`Columna 'periodo_label' no detectada (Error ${error.code}). Reintentando guardar sin etiqueta.`);
+       
+       // Reintento: Guardar SIN la etiqueta para asegurar que los números se guarden
+       const { error: retryError } = await supabase
+        .from('historico_bimestral')
+        .upsert(basePayload, { onConflict: 'area' });
+
+       if (retryError) {
+          throw new Error("Error al guardar histórico (Reintento fallido): " + retryError.message);
+       }
+       
+       // Éxito parcial (Se guardaron datos pero no la etiqueta)
+       console.info("Datos numéricos guardados correctamente (Etiqueta omitida por falta de columna en DB).");
+       return; 
+    }
+
+    if (error.code === 'PGRST205') {
+       throw new Error("La tabla 'historico_bimestral' no existe. Ejecuta el SQL de instalación.");
+    }
+
     console.error(`Error guardando histórico para ${area}:`, JSON.stringify(error, null, 2));
     throw new Error(error.message || "Error desconocido al guardar histórico");
   }
+};
+
+/**
+ * NUEVO: Obtiene la línea de tiempo histórica para gráficas
+ */
+export const fetchTimelineData = async () => {
+  if (!isConfigured()) return [];
+
+  const { data, error } = await supabase
+    .from('historico_timeline')
+    .select('*')
+    .order('fecha_cierre', { ascending: true });
+
+  if (error) {
+    // PGRST205: relation does not exist (Tabla no creada)
+    if (error.code === 'PGRST205') {
+       console.warn("Tabla 'historico_timeline' no encontrada. La gráfica estará vacía hasta crear la tabla.");
+       return [];
+    }
+    console.error("Error fetching timeline:", JSON.stringify(error, null, 2));
+    return [];
+  }
+  return data || [];
+};
+
+/**
+ * Convierte los datos de 'historico_bimestral' al formato de 'historico_timeline'
+ * para poder graficarlos juntos.
+ */
+export const fetchBimestralAsTimelineRows = async () => {
+  if (!isConfigured()) return [];
+
+  const { data, error } = await supabase
+    .from('historico_bimestral')
+    .select('*');
+
+  if (error || !data || data.length === 0) return [];
+
+  // Mapeamos las filas para que parezcan venir de 'historico_timeline'
+  return data.map((row: any) => {
+    // Determinar etiqueta: Si usuario puso algo, usar eso. Si no, usar la fecha de actualización (Mes y Año).
+    let etiquetaClean = "Bimestre Anterior";
+    
+    if (row.periodo_label && row.periodo_label.trim().length > 0) {
+      etiquetaClean = row.periodo_label;
+    } else if (row.updated_at) {
+      try {
+        // Formatear fecha automática si no hay etiqueta (ej: "Marzo 2024")
+        const dateObj = new Date(row.updated_at);
+        const mes = dateObj.toLocaleString('es-ES', { month: 'long' });
+        const anio = dateObj.getFullYear();
+        // Capitalizar primera letra del mes
+        const mesCap = mes.charAt(0).toUpperCase() + mes.slice(1);
+        etiquetaClean = `${mesCap} ${anio}`;
+      } catch (e) {
+        etiquetaClean = "Bimestre Anterior";
+      }
+    }
+
+    return {
+      id: `temp_${row.id}`, // ID temporal con prefijo para identificarlo en el frontend
+      fecha_cierre: row.updated_at || new Date().toISOString(),
+      area: row.area,
+      score: row.score_anterior,
+      count: row.count_anterior,
+      etiqueta: etiquetaClean
+    };
+  });
+};
+
+/**
+ * NUEVO: Guarda un snapshot completo de todas las áreas en la línea de tiempo
+ */
+export const saveTimelineSnapshot = async (statsByArea: Record<string, any>, label: string = "Cierre") => {
+  if (!isConfigured()) return { success: false, error: "DB no configurada" };
+
+  const fechaCierre = new Date().toISOString();
+  const areas = Object.values(Area);
+  
+  const insertData = areas.map(area => {
+    const stat = statsByArea[area];
+    // Convertir a escala 0-100 si viene en 0-10, o usar 0 si no hay datos
+    const score = stat ? (stat.avgScore * 10) : 0;
+    const count = stat ? stat.total : 0;
+    
+    return {
+      fecha_cierre: fechaCierre,
+      area: area,
+      score: score,
+      count: count,
+      etiqueta: label
+    };
+  });
+
+  const { error } = await supabase
+    .from('historico_timeline')
+    .insert(insertData);
+
+  if (error) {
+    if (error.code === 'PGRST205') {
+      return { success: false, error: "La tabla 'historico_timeline' no existe. Ejecuta el script SQL en Supabase." };
+    }
+    console.error("Error saving timeline snapshot:", JSON.stringify(error, null, 2));
+    return { success: false, error: error.message };
+  }
+  return { success: true };
 };
 
 /**
@@ -148,7 +288,7 @@ export const fetchSurveysList = async (areaFilter: string) => {
   const { data, error } = await query;
   
   if (error) {
-    console.error("Error fetching surveys list", error);
+    console.error("Error fetching surveys list", JSON.stringify(error, null, 2));
     return [];
   }
   return data || [];
@@ -170,7 +310,7 @@ export const deleteSurvey = async (id: number): Promise<{ success: boolean; erro
       .eq('encuesta_id', id);
 
     if (answersError) {
-      console.warn("Error borrando respuestas (posiblemente ya borradas o no existen):", answersError);
+      console.warn("Error borrando respuestas (posiblemente ya borradas o no existen):", JSON.stringify(answersError, null, 2));
       // No lanzamos error aquí, intentamos borrar la encuesta de todas formas
     }
 
@@ -181,7 +321,7 @@ export const deleteSurvey = async (id: number): Promise<{ success: boolean; erro
       .eq('id', id);
 
     if (error) {
-      console.error("Error deleting survey", error);
+      console.error("Error deleting survey", JSON.stringify(error, null, 2));
       return { success: false, error: error.message || JSON.stringify(error) };
     }
     
@@ -206,6 +346,7 @@ export const fetchDashboardStats = async () => {
     .select('*');
 
   if (surveyError || answersError || !surveys || !answers) {
+    console.error("Error fetching dashboard data:", JSON.stringify(surveyError || answersError, null, 2));
     return null;
   }
 
@@ -349,7 +490,7 @@ export const fetchExcelData = async () => {
     .select('*');
 
   if (surveyError || answersError || !surveys || !answers) {
-    console.error("Error fetching excel data", surveyError || answersError);
+    console.error("Error fetching excel data", JSON.stringify(surveyError || answersError, null, 2));
     return [];
   }
   
