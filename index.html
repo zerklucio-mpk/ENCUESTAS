@@ -14,7 +14,7 @@
         color: #1E293B; /* Slate 800 - Alto contraste para mejor lectura */
       }
       
-      /* Animaciones suaves pero no mareantes */
+      /* Animaciones suaves generales */
       @keyframes fadeIn {
         from { opacity: 0; transform: translateY(5px); }
         to { opacity: 1; transform: translateY(0); }
@@ -22,6 +22,31 @@
 
       .animate-fade-in {
         animation: fadeIn 0.4s ease-out forwards;
+      }
+
+      /* Animaciones específicas para Presentación */
+      @keyframes slideInUp {
+        from { 
+          opacity: 0; 
+          transform: translateY(20px) scale(0.98); 
+        }
+        to { 
+          opacity: 1; 
+          transform: translateY(0) scale(1); 
+        }
+      }
+
+      @keyframes scaleIn {
+        from { opacity: 0; transform: scale(0.95); }
+        to { opacity: 1; transform: scale(1); }
+      }
+
+      .animate-slide-up {
+        animation: slideInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      }
+
+      .animate-scale-in {
+        animation: scaleIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
       }
 
       .custom-scrollbar::-webkit-scrollbar {
@@ -47,11 +72,11 @@
         "html2canvas": "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.esm.js",
         "jspdf": "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/+esm",
         "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs",
-        "@supabase/supabase-js": "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"
+        "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.39.7"
       }
     }
     </script>
-  <script type="module" crossorigin src="/ENCUESTAS/assets/index-Nsbjb0ga.js"></script>
+  <script type="module" crossorigin src="/ENCUESTAS/assets/index-CmY1Rc49.js"></script>
 </head>
   <body class="antialiased selection:bg-blue-200 selection:text-blue-900">
     <div id="root"></div>
