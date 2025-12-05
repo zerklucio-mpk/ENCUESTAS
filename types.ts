@@ -1,3 +1,4 @@
+
 export enum Area {
   ALMACEN_C = "Almacén C",
   ALMACEN_F = "Almacén F",

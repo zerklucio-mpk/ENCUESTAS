@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, BarChart3, Users, TrendingUp, AlertCircle, MessageSquare, Filter, History, Save, X, FileDown, Loader2, FileSpreadsheet, RefreshCw, Database, Calendar, Trash2, List, AlertTriangle, ArrowDownToLine, Check, Copy, ChevronUp, ChevronDown, LineChart, MoreHorizontal, LayoutDashboard, MonitorPlay, ChevronRight, ChevronLeft, Trophy, Medal, Building2, Lock, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, BarChart3, Users, TrendingUp, AlertCircle, MessageSquare, Filter, History, Save, X, FileDown, Loader2, FileSpreadsheet, RefreshCw, Database, Calendar, Trash2, List, AlertTriangle, ArrowDownToLine, Check, Copy, ChevronUp, ChevronDown, LineChart, MoreHorizontal, LayoutDashboard, MonitorPlay, ChevronRight, ChevronLeft, Trophy, Medal, Building2, Lock, ShieldCheck, Eye, EyeOff } from 'lucide-react';
 import { Area, SURVEY_QUESTIONS, Mood, Frequency } from '../types';
 import { fetchDashboardStats, fetchHistoricalData, upsertHistoricalData, fetchExcelData, fetchSurveysList, deleteSurvey, saveTimelineSnapshot, fetchTimelineData, fetchBimestralAsTimelineRows } from '../services/dbService';
 import { isConfigured } from '../services/supabaseClient';
@@ -24,6 +25,10 @@ interface QuestionStat {
   siempre: number;
   aVeces: number;
   nunca: number;
+  // Raw counts
+  siempreCount: number;
+  aVecesCount: number;
+  nuncaCount: number;
 }
 
 interface HistoricalData {
@@ -68,9 +73,6 @@ const ResultsView: React.FC<ResultsViewProps> = ({ onBack }) => {
   const [isExcelExporting, setIsExcelExporting] = useState(false);
   const [dbConfigured, setDbConfigured] = useState(true);
   
-  // Estado para visualización de comentarios
-  const [showComments, setShowComments] = useState(false);
-  
   // Estado para confirmación de borrado personalizado
   const [surveyToDelete, setSurveyToDelete] = useState<number | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -81,6 +83,9 @@ const ResultsView: React.FC<ResultsViewProps> = ({ onBack }) => {
   // Estado para confirmación de Snapshot Timeline (Gráfica)
   const [isTimelineSnapshotLoading, setIsTimelineSnapshotLoading] = useState(false);
   
+  // Estado para mostrar/ocultar comentarios
+  const [showComments, setShowComments] = useState(false);
+
   // Estados de carga
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -106,11 +111,6 @@ const ResultsView: React.FC<ResultsViewProps> = ({ onBack }) => {
     setDbConfigured(isConfigured());
     loadAllData();
   }, []);
-
-  // Resetear la vista de comentarios cuando se cambia de área
-  useEffect(() => {
-    setShowComments(false);
-  }, [selectedArea]);
 
   // Manejo de teclado para la presentación
   useEffect(() => {
@@ -182,6 +182,10 @@ const ResultsView: React.FC<ResultsViewProps> = ({ onBack }) => {
 
   // Función para abrir la gráfica evolutiva
   const handleOpenTimeline = async () => {
+    if (!dbConfigured) {
+      alert("No hay base de datos conectada para ver el historial.");
+      return;
+    }
     setIsTimelineModalOpen(true);
     setLoadingTimeline(true);
     try {
@@ -308,7 +312,12 @@ const ResultsView: React.FC<ResultsViewProps> = ({ onBack }) => {
     vulnerabilityCount: 0,
     comments: [],
     moodDistribution: [],
-    questionsBreakdown: SURVEY_QUESTIONS.map(q => ({ id: q.id, text: q.text, siempre: 0, aVeces: 0, nunca: 0 }))
+    questionsBreakdown: SURVEY_QUESTIONS.map(q => ({ 
+      id: q.id, 
+      text: q.text, 
+      siempre: 0, aVeces: 0, nunca: 0, 
+      siempreCount: 0, aVecesCount: 0, nuncaCount: 0 
+    }))
   };
 
   // Helper para comparar históricos dinámicamente
@@ -506,7 +515,7 @@ const ResultsView: React.FC<ResultsViewProps> = ({ onBack }) => {
   const presentationSlides = [
     "Portada",
     "Resumen Ejecutivo",
-    "Clima Laboral",
+    // REMOVED: "Clima Laboral"
     "Factores de Riesgo (1/2)",
     "Factores de Riesgo (2/2)",
     "Ranking por Áreas"
@@ -706,83 +715,63 @@ const ResultsView: React.FC<ResultsViewProps> = ({ onBack }) => {
            </div>
         </div>
 
-        {/* 4. MAIN GRID */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-           
-           {/* Section: Mood Distribution */}
-           <div className={`bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col transition-all duration-300 ${showComments ? '' : 'lg:col-span-2'}`}>
-              <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                 <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
-                    <div className="w-1 h-5 bg-blue-600 rounded-full"></div>
-                    Distribución de Ánimo
-                 </h3>
-                 <button 
-                  onClick={() => setShowComments(!showComments)}
-                  className={`text-xs font-bold px-3 py-1.5 rounded-lg border transition-colors flex items-center gap-2 ${showComments ? 'bg-slate-200 text-slate-700 border-transparent' : 'bg-white text-blue-600 border-blue-200 hover:bg-blue-50'}`}
-                 >
-                    {showComments ? 'Ocultar' : 'Ver'} Comentarios
-                    {showComments ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                 </button>
-              </div>
-              
-              <div className="p-8">
-                 {currentStats.total > 0 ? (
-                    <div className="space-y-6">
-                       {currentStats.moodDistribution.map((item) => (
-                          <div key={item.label} className="group">
-                             <div className="flex justify-between text-sm font-bold text-slate-500 mb-2 group-hover:text-slate-800 transition-colors">
-                                <span>{item.label}</span>
-                                <span>{item.percentage}%</span>
+        {/* 4. MAIN GRID - NOW ONLY COMMENTS */}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-[400px] animate-fade-in">
+            <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+               <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
+                  <MessageSquare className="w-5 h-5 text-slate-400" /> Comentarios
+               </h3>
+               <button 
+                 onClick={() => setShowComments(!showComments)}
+                 className="flex items-center gap-2 text-xs font-bold text-slate-500 hover:text-blue-600 bg-white hover:bg-blue-50 border border-slate-200 px-3 py-1.5 rounded-lg transition-colors"
+               >
+                 {showComments ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                 {showComments ? 'Ocultar' : 'Mostrar'}
+               </button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto custom-scrollbar flex-grow bg-slate-50/30 relative">
+               {!showComments ? (
+                 <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-3">
+                    <div className="bg-slate-100 p-4 rounded-full border border-slate-200">
+                       <EyeOff className="w-8 h-8 text-slate-400" />
+                    </div>
+                    <div className="text-center max-w-xs">
+                       <p className="font-bold text-slate-600 text-lg">Comentarios Ocultos por Privacidad</p>
+                       <p className="text-sm mb-4">Los datos cualitativos están protegidos en la vista general.</p>
+                       <button 
+                         onClick={() => setShowComments(true)}
+                         className="px-4 py-2 bg-white border border-slate-300 shadow-sm rounded-lg text-sm font-bold text-slate-700 hover:bg-slate-50 hover:text-blue-700 transition-colors"
+                       >
+                         Mostrar Comentarios
+                       </button>
+                    </div>
+                 </div>
+               ) : (
+                  currentStats.comments.length > 0 ? (
+                    <div className="space-y-4">
+                       {currentStats.comments.map((comment, idx) => (
+                          <div key={idx} className="bg-white p-5 rounded-xl border border-slate-100 shadow-sm relative animate-fade-in">
+                             <div className="flex items-center gap-2 mb-3">
+                                <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide">
+                                   {comment.date ? new Date(comment.date).toLocaleDateString() : 'N/D'}
+                                </span>
                              </div>
-                             <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
-                                <div className={`h-full rounded-full ${item.color} shadow-sm transition-all duration-1000 ease-out`} style={{ width: `${item.percentage}%` }}></div>
-                             </div>
+                             <p className="text-slate-600 text-sm leading-relaxed italic border-l-2 border-blue-200 pl-3">
+                                "{comment.text}"
+                             </p>
                           </div>
                        ))}
                     </div>
-                 ) : (
-                    <div className="py-12 flex flex-col items-center justify-center text-slate-300">
-                       <BarChart3 className="w-16 h-16 mb-4 opacity-50" />
-                       <p className="font-semibold text-slate-400">Sin datos registrados</p>
+                  ) : (
+                    <div className="h-full flex flex-col justify-center items-center text-center text-slate-300">
+                       <MessageSquare className="w-12 h-12 mb-2 opacity-50" />
+                       <p className="font-semibold text-slate-400">No hay comentarios reportados.</p>
                     </div>
-                 )}
-              </div>
-           </div>
-
-           {/* Section: Comments (Conditional) */}
-           {showComments && (
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-[400px] animate-fade-in">
-                 <div className="p-6 border-b border-slate-100 bg-slate-50/50">
-                    <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
-                       <MessageSquare className="w-5 h-5 text-slate-400" /> Comentarios
-                    </h3>
-                 </div>
-                 <div className="p-6 overflow-y-auto custom-scrollbar flex-grow bg-slate-50/30">
-                    {currentStats.comments.length > 0 ? (
-                       <div className="space-y-4">
-                          {currentStats.comments.map((comment, idx) => (
-                             <div key={idx} className="bg-white p-5 rounded-xl border border-slate-100 shadow-sm relative">
-                                <div className="flex items-center gap-2 mb-3">
-                                   <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide">
-                                      {comment.date ? new Date(comment.date).toLocaleDateString() : 'N/D'}
-                                   </span>
-                                </div>
-                                <p className="text-slate-600 text-sm leading-relaxed italic border-l-2 border-blue-200 pl-3">
-                                   "{comment.text}"
-                                </p>
-                             </div>
-                          ))}
-                       </div>
-                    ) : (
-                       <div className="h-full flex flex-col justify-center items-center text-center text-slate-300">
-                          <MessageSquare className="w-12 h-12 mb-2 opacity-50" />
-                          <p className="font-semibold text-slate-400">No hay comentarios</p>
-                       </div>
-                    )}
-                 </div>
-              </div>
-           )}
-        </div>
+                  )
+               )}
+            </div>
+         </div>
 
         {/* 5. QUESTION BREAKDOWN */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-12">
@@ -820,10 +809,23 @@ const ResultsView: React.FC<ResultsViewProps> = ({ onBack }) => {
                           {q.nunca > 0 && <div style={{ width: `${q.nunca}%` }} className="bg-slate-400 h-full"></div>}
                        </div>
                        
-                       <div className="flex justify-between text-xs font-bold text-slate-400 mt-1 ml-11 md:w-[calc(100%-2.75rem)]">
-                          <span className={q.siempre > 0 ? "text-blue-600" : ""}>{q.siempre > 0 ? `${q.siempre}%` : ''}</span>
-                          <span className={q.aVeces > 0 ? "text-amber-600" : ""}>{q.aVeces > 0 ? `${q.aVeces}%` : ''}</span>
-                          <span className={q.nunca > 0 ? "text-slate-600" : ""}>{q.nunca > 0 ? `${q.nunca}%` : ''}</span>
+                       {/* ETIQUETAS ALINEADAS PROPORCIONALMENTE */}
+                       <div className="flex w-full text-xs font-bold text-slate-400 mt-1 ml-11 md:w-[calc(100%-2.75rem)]">
+                          {q.siempre > 0 && (
+                            <div style={{ width: `${q.siempre}%` }} className="text-center text-blue-600 truncate px-1" title={`${q.siempre}% (${q.siempreCount})`}>
+                               {q.siempre}% <span className="text-[10px] opacity-80">({q.siempreCount})</span>
+                            </div>
+                          )}
+                          {q.aVeces > 0 && (
+                            <div style={{ width: `${q.aVeces}%` }} className="text-center text-amber-600 truncate px-1" title={`${q.aVeces}% (${q.aVecesCount})`}>
+                               {q.aVeces}% <span className="text-[10px] opacity-80">({q.aVecesCount})</span>
+                            </div>
+                          )}
+                          {q.nunca > 0 && (
+                            <div style={{ width: `${q.nunca}%` }} className="text-center text-slate-600 truncate px-1" title={`${q.nunca}% (${q.nuncaCount})`}>
+                               {q.nunca}% <span className="text-[10px] opacity-80">({q.nuncaCount})</span>
+                            </div>
+                          )}
                        </div>
                     </div>
                  ))}
@@ -836,7 +838,17 @@ const ResultsView: React.FC<ResultsViewProps> = ({ onBack }) => {
       {/* ===================================================================================== */}
       {/* 6. HIDDEN PRINT TEMPLATE (SOLO VISIBLE INTERNAMENTE PARA HTML2CANVAS)                  */}
       {/* ===================================================================================== */}
-      <div className="absolute -z-50 opacity-0 pointer-events-none w-[1000px] top-0 left-0" ref={pdfExportRef}>
+      <div 
+        ref={pdfExportRef} 
+        style={{ 
+          position: 'fixed', 
+          top: 0, 
+          left: '-9999px', 
+          width: '1000px', 
+          zIndex: -50,
+          backgroundColor: '#ffffff'
+        }}
+      >
          <div className="bg-white p-12 w-full text-slate-900 font-sans">
             
             {/* PDF Header - Diseño IDÉNTICO a App.tsx */}
@@ -884,21 +896,7 @@ const ResultsView: React.FC<ResultsViewProps> = ({ onBack }) => {
                </div>
             </div>
 
-            {/* PDF Mood Distribution */}
-            <div className="mb-12 break-inside-avoid">
-               <h2 className="text-xl font-bold text-slate-800 mb-4 border-l-4 border-blue-600 pl-3">Distribución de Ánimo</h2>
-               <div className="bg-white border border-slate-200 p-6 rounded">
-                  {currentStats.moodDistribution.map((item) => (
-                    <div key={item.label} className="flex items-center mb-3 last:mb-0">
-                       <div className="w-32 font-bold text-slate-600 text-sm">{item.label}</div>
-                       <div className="flex-grow bg-slate-100 h-4 rounded overflow-hidden mr-4">
-                          <div className={`h-full ${item.color}`} style={{ width: `${item.percentage}%` }}></div>
-                       </div>
-                       <div className="w-12 text-right font-bold text-slate-800">{item.percentage}%</div>
-                    </div>
-                  ))}
-               </div>
-            </div>
+            {/* MOOD DISTRIBUTION REMOVED FROM PDF */}
 
             {/* PDF Questions */}
             <div className="mb-12">
@@ -907,17 +905,17 @@ const ResultsView: React.FC<ResultsViewProps> = ({ onBack }) => {
                   <div className="bg-slate-100 p-3 flex text-xs font-bold text-slate-500 uppercase">
                      <div className="w-10">ID</div>
                      <div className="flex-grow">Pregunta</div>
-                     <div className="w-20 text-center text-blue-700">Siempre</div>
-                     <div className="w-20 text-center text-amber-600">A veces</div>
-                     <div className="w-20 text-center text-slate-600">Nunca</div>
+                     <div className="w-24 text-center text-blue-700">Siempre</div>
+                     <div className="w-24 text-center text-amber-600">A veces</div>
+                     <div className="w-24 text-center text-slate-600">Nunca</div>
                   </div>
                   {currentStats.questionsBreakdown.map((q, idx) => (
                      <div key={q.id} className={`p-3 flex items-center border-t border-slate-100 ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
                         <div className="w-10 font-bold text-slate-400">{q.id}</div>
                         <div className="flex-grow pr-4 text-sm font-semibold text-slate-800">{q.text}</div>
-                        <div className="w-20 text-center font-bold text-blue-700">{q.siempre}%</div>
-                        <div className="w-20 text-center font-bold text-amber-600">{q.aVeces}%</div>
-                        <div className="w-20 text-center font-bold text-slate-500">{q.nunca}%</div>
+                        <div className="w-24 text-center font-bold text-blue-700 text-xs">{q.siempre}% <span className="opacity-60 text-[10px]">({q.siempreCount})</span></div>
+                        <div className="w-24 text-center font-bold text-amber-600 text-xs">{q.aVeces}% <span className="opacity-60 text-[10px]">({q.aVecesCount})</span></div>
+                        <div className="w-24 text-center font-bold text-slate-500 text-xs">{q.nunca}% <span className="opacity-60 text-[10px]">({q.nuncaCount})</span></div>
                      </div>
                   ))}
                </div>
@@ -955,7 +953,7 @@ const ResultsView: React.FC<ResultsViewProps> = ({ onBack }) => {
 
 
       {/* ================= MODALS (PRESERVED) ================= */}
-      
+
       {/* MODAL TIMELINE CHART - Z-Index 60 */}
       {isTimelineModalOpen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4 animate-fade-in">
@@ -974,7 +972,7 @@ const ResultsView: React.FC<ResultsViewProps> = ({ onBack }) => {
                   onClick={handleArchiveTimeline}
                   disabled={isTimelineSnapshotLoading}
                   className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg shadow-md hover:bg-blue-700 transition-colors flex items-center gap-2 disabled:opacity-50"
-                 >
+                  >
                    {isTimelineSnapshotLoading ? <Loader2 className="w-4 h-4 animate-spin"/> : <Save className="w-4 h-4" />}
                    Archivar Estado Actual
                  </button>
@@ -1271,29 +1269,54 @@ const ResultsView: React.FC<ResultsViewProps> = ({ onBack }) => {
 
       {/* ================= PRESENTATION MODE OVERLAY ================= */}
       {isPresentationOpen && (
-        <div className="fixed inset-0 z-[100] bg-white flex flex-col animate-fade-in">
+        <div className="fixed inset-0 z-[100] bg-slate-50 flex flex-col animate-fade-in">
           
-          {/* Controls Header */}
-          <div className="absolute top-0 right-0 p-4 flex gap-4 z-20">
-            <div className="bg-slate-100/80 backdrop-blur rounded-full px-4 py-2 text-xs font-bold text-slate-500 border border-slate-200 shadow-sm">
-               Diapositiva {currentSlide + 1} / {presentationSlides.length}
-            </div>
-            <button 
-              onClick={() => setIsPresentationOpen(false)}
-              className="p-2 bg-slate-100 hover:bg-red-50 text-slate-500 hover:text-red-600 rounded-full transition-colors border border-slate-200 shadow-sm"
-              title="Salir (ESC)"
-            >
-              <X className="w-5 h-5" />
-            </button>
+          {/* HEADER BAR (Glassmorphism & Structure) */}
+          <div className="flex items-center justify-between px-6 py-4 bg-white/80 backdrop-blur-md border-b border-slate-200 relative z-20 shadow-sm flex-shrink-0">
+             {/* Left: Filter */}
+             <div className="relative group min-w-[280px]">
+                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                   <Filter className="w-4 h-4" />
+                </div>
+                <select 
+                   value={selectedArea} 
+                   onChange={(e) => setSelectedArea(e.target.value)} 
+                   className="w-full appearance-none bg-slate-100 hover:bg-white border border-slate-200 hover:border-blue-300 text-slate-700 font-bold py-2.5 pl-10 pr-10 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer transition-all text-xs uppercase tracking-wide"
+                >
+                   <option value="GENERAL">🏢 Toda la Empresa</option>
+                   <optgroup label="Áreas Operativas">
+                      {AREAS_LIST.map(area => (<option key={area} value={area}>{area}</option>))}
+                   </optgroup>
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+             </div>
+
+             {/* Right: Controls */}
+             <div className="flex items-center gap-4">
+                <div className="bg-slate-100 px-4 py-2 rounded-lg text-xs font-bold text-slate-500 border border-slate-200">
+                   Diapositiva {currentSlide + 1} de {presentationSlides.length}
+                </div>
+                <div className="h-6 w-px bg-slate-300"></div>
+                <button 
+                   onClick={() => setIsPresentationOpen(false)}
+                   className="p-2 bg-white hover:bg-red-50 text-slate-500 hover:text-red-600 rounded-lg transition-colors border border-slate-200 shadow-sm"
+                   title="Salir (ESC)"
+                >
+                   <X className="w-5 h-5" />
+                </button>
+             </div>
           </div>
 
           {/* Slide Content Container */}
-          <div className="flex-grow flex items-center justify-center p-4 md:p-8 overflow-hidden relative">
+          <div className="flex-grow flex items-center justify-center p-4 md:p-8 overflow-hidden relative bg-slate-50/50">
+             
+             {/* WRAPPER FOR SLIDE ANIMATION - Key triggers animation reset */}
+             <div key={currentSlide} className="w-full h-full flex items-center justify-center animate-slide-up">
             
             {/* Slide 0: Portada */}
             {currentSlide === 0 && (
-              <div className="text-center animate-fade-in max-w-4xl">
-                 <div className="inline-block p-6 rounded-3xl bg-blue-50 mb-6 shadow-inner">
+              <div className="text-center max-w-4xl">
+                 <div className="inline-block p-6 rounded-3xl bg-blue-50 mb-6 shadow-inner animate-scale-in">
                     <LayoutDashboard className="w-20 h-20 text-blue-800" />
                  </div>
                  <h1 className="text-5xl font-black text-slate-900 mb-4 tracking-tight">Reporte de Resultados</h1>
@@ -1314,7 +1337,7 @@ const ResultsView: React.FC<ResultsViewProps> = ({ onBack }) => {
 
             {/* Slide 1: Resumen Ejecutivo (KPIs) */}
             {currentSlide === 1 && (
-              <div className="w-full max-w-5xl animate-fade-in">
+              <div className="w-full max-w-5xl">
                  <h2 className="text-3xl font-black text-slate-800 mb-8 border-l-8 border-blue-600 pl-4">Resumen Ejecutivo</h2>
                  <div className="grid grid-cols-3 gap-6">
                     <div className="bg-blue-50 rounded-2xl p-6 shadow-lg border border-blue-100 flex flex-col justify-between h-64">
@@ -1360,102 +1383,102 @@ const ResultsView: React.FC<ResultsViewProps> = ({ onBack }) => {
               </div>
             )}
 
-            {/* Slide 2: Distribución de Ánimo */}
+            {/* Slide 2: Preguntas Parte 1 (Was Slide 3) */}
             {currentSlide === 2 && (
-               <div className="w-full max-w-4xl animate-fade-in flex flex-col items-center">
-                  <div className="w-full mb-8">
-                     <h2 className="text-3xl font-black text-slate-800 mb-2 border-l-8 border-purple-600 pl-4">Clima Laboral</h2>
-                     <p className="pl-6 text-lg text-slate-500">Distribución de estados de ánimo reportados.</p>
-                  </div>
-                  
-                  <div className="w-full bg-white rounded-3xl shadow-xl border border-slate-200 p-8">
-                    {currentStats.moodDistribution.map((item) => (
-                      <div key={item.label} className="mb-6 last:mb-0">
-                         <div className="flex justify-between items-end mb-2">
-                            <span className="text-xl font-bold text-slate-700">{item.label}</span>
-                            <span className="text-2xl font-black text-slate-900">{item.percentage}%</span>
-                         </div>
-                         <div className="w-full bg-slate-100 rounded-full h-6 overflow-hidden">
-                            <div className={`h-full rounded-full ${item.color} shadow-lg`} style={{ width: `${item.percentage}%` }}></div>
-                         </div>
-                      </div>
-                    ))}
-                  </div>
-               </div>
-            )}
-
-            {/* Slide 3: Preguntas Parte 1 */}
-            {currentSlide === 3 && (
-               <div className="w-full max-w-5xl animate-fade-in">
-                  <div className="w-full mb-6 flex justify-between items-end border-b border-slate-200 pb-4">
+               <div className="w-full max-w-6xl h-full flex flex-col">
+                  <div className="w-full mb-2 flex justify-between items-end border-b border-slate-200 pb-2 flex-shrink-0">
                      <div>
-                       <h2 className="text-3xl font-black text-slate-800 mb-1 border-l-8 border-emerald-500 pl-4">Factores de Riesgo</h2>
-                       <p className="pl-6 text-lg text-slate-500">Desglose detallado (Parte 1/2)</p>
-                     </div>
-                     <div className="flex gap-4 text-xs font-bold">
-                        <div className="flex items-center gap-2"><div className="w-3 h-3 bg-blue-600 rounded"></div> Siempre</div>
-                        <div className="flex items-center gap-2"><div className="w-3 h-3 bg-amber-500 rounded"></div> A veces</div>
-                        <div className="flex items-center gap-2"><div className="w-3 h-3 bg-slate-400 rounded"></div> Nunca</div>
+                       <h2 className="text-2xl font-black text-slate-800 mb-1 border-l-8 border-emerald-500 pl-3">Factores de Riesgo (1/2)</h2>
                      </div>
                   </div>
 
-                  <div className="grid gap-4">
+                  <div className="flex-1 flex flex-col justify-center gap-2 overflow-hidden">
                      {currentStats.questionsBreakdown.slice(0, 7).map(q => (
-                        <div key={q.id} className="bg-slate-50 p-3 rounded-lg flex items-center shadow-sm">
-                           <div className="w-8 text-xl font-black text-slate-300">{q.id}.</div>
-                           <div className="flex-grow pr-4">
-                              <p className="text-base font-bold text-slate-800">{q.text}</p>
+                        <div key={q.id} className="bg-white border border-slate-100 py-2 px-4 rounded-lg shadow-sm flex items-center gap-4">
+                           {/* Left Column: ID + Text (60% width) */}
+                           <div className="flex items-start gap-3 flex-1">
+                              <span className="text-lg font-black text-slate-400 min-w-[1.4rem]">{q.id}.</span>
+                              <p className="text-base font-bold text-slate-800 leading-tight">{q.text}</p>
                            </div>
-                           <div className="w-1/3 h-4 flex rounded-full overflow-hidden bg-slate-200">
-                              <div style={{ width: `${q.siempre}%` }} className="bg-blue-600 h-full"></div>
-                              <div style={{ width: `${q.aVeces}%` }} className="bg-amber-500 h-full"></div>
-                              <div style={{ width: `${q.nunca}%` }} className="bg-slate-400 h-full"></div>
+
+                           {/* Right Column: Visuals (40% width) */}
+                           <div className="w-[40%] flex flex-col justify-center">
+                              {/* Bar */}
+                              <div className="w-full h-3 flex rounded-full overflow-hidden bg-slate-100 mb-1 border border-slate-200">
+                                 {q.siempre > 0 && <div style={{ width: `${q.siempre}%` }} className="bg-blue-600 h-full transition-all duration-1000 ease-out"></div>}
+                                 {q.aVeces > 0 && <div style={{ width: `${q.aVeces}%` }} className="bg-amber-500 h-full transition-all duration-1000 ease-out"></div>}
+                                 {q.nunca > 0 && <div style={{ width: `${q.nunca}%` }} className="bg-slate-400 h-full transition-all duration-1000 ease-out"></div>}
+                              </div>
+
+                              {/* Compact Stats Line */}
+                              <div className="flex justify-end gap-3 text-xs font-bold">
+                                 {q.siempreCount >= 0 && (
+                                    <span className="text-blue-700">Siempre: {q.siempre}%</span>
+                                 )}
+                                 {q.aVecesCount >= 0 && (
+                                    <span className="text-amber-700">A veces: {q.aVeces}%</span>
+                                 )}
+                                 {q.nuncaCount >= 0 && (
+                                    <span className="text-slate-600">Nunca: {q.nunca}%</span>
+                                 )}
+                              </div>
                            </div>
-                           <div className="w-12 text-right font-bold text-blue-700 ml-3 text-lg">{q.siempre}%</div>
                         </div>
                      ))}
                   </div>
                </div>
             )}
 
-            {/* Slide 4: Preguntas Parte 2 */}
-            {currentSlide === 4 && (
-               <div className="w-full max-w-5xl animate-fade-in">
-                  <div className="w-full mb-6 flex justify-between items-end border-b border-slate-200 pb-4">
+            {/* Slide 3: Preguntas Parte 2 (Was Slide 4) */}
+            {currentSlide === 3 && (
+               <div className="w-full max-w-6xl h-full flex flex-col">
+                  <div className="w-full mb-2 flex justify-between items-end border-b border-slate-200 pb-2 flex-shrink-0">
                      <div>
-                       <h2 className="text-3xl font-black text-slate-800 mb-1 border-l-8 border-emerald-500 pl-4">Factores de Riesgo</h2>
-                       <p className="pl-6 text-lg text-slate-500">Desglose detallado (Parte 2/2)</p>
-                     </div>
-                     <div className="flex gap-4 text-xs font-bold">
-                        <div className="flex items-center gap-2"><div className="w-3 h-3 bg-blue-600 rounded"></div> Siempre</div>
-                        <div className="flex items-center gap-2"><div className="w-3 h-3 bg-amber-500 rounded"></div> A veces</div>
-                        <div className="flex items-center gap-2"><div className="w-3 h-3 bg-slate-400 rounded"></div> Nunca</div>
+                       <h2 className="text-2xl font-black text-slate-800 mb-1 border-l-8 border-emerald-500 pl-3">Factores de Riesgo (2/2)</h2>
                      </div>
                   </div>
 
-                  <div className="grid gap-4">
+                  <div className="flex-1 flex flex-col justify-center gap-2 overflow-hidden">
                      {currentStats.questionsBreakdown.slice(7, 14).map(q => (
-                        <div key={q.id} className="bg-slate-50 p-3 rounded-lg flex items-center shadow-sm">
-                           <div className="w-8 text-xl font-black text-slate-300">{q.id}.</div>
-                           <div className="flex-grow pr-4">
-                              <p className="text-base font-bold text-slate-800">{q.text}</p>
+                        <div key={q.id} className="bg-white border border-slate-100 py-2 px-4 rounded-lg shadow-sm flex items-center gap-4">
+                           {/* Left Column: ID + Text (60% width) */}
+                           <div className="flex items-start gap-3 flex-1">
+                              <span className="text-lg font-black text-slate-400 min-w-[1.4rem]">{q.id}.</span>
+                              <p className="text-base font-bold text-slate-800 leading-tight">{q.text}</p>
                            </div>
-                           <div className="w-1/3 h-4 flex rounded-full overflow-hidden bg-slate-200">
-                              <div style={{ width: `${q.siempre}%` }} className="bg-blue-600 h-full"></div>
-                              <div style={{ width: `${q.aVeces}%` }} className="bg-amber-500 h-full"></div>
-                              <div style={{ width: `${q.nunca}%` }} className="bg-slate-400 h-full"></div>
+
+                           {/* Right Column: Visuals (40% width) */}
+                           <div className="w-[40%] flex flex-col justify-center">
+                              {/* Bar */}
+                              <div className="w-full h-3 flex rounded-full overflow-hidden bg-slate-100 mb-1 border border-slate-200">
+                                 {q.siempre > 0 && <div style={{ width: `${q.siempre}%` }} className="bg-blue-600 h-full transition-all duration-1000 ease-out"></div>}
+                                 {q.aVeces > 0 && <div style={{ width: `${q.aVeces}%` }} className="bg-amber-500 h-full transition-all duration-1000 ease-out"></div>}
+                                 {q.nunca > 0 && <div style={{ width: `${q.nunca}%` }} className="bg-slate-400 h-full transition-all duration-1000 ease-out"></div>}
+                              </div>
+
+                              {/* Compact Stats Line */}
+                              <div className="flex justify-end gap-3 text-xs font-bold">
+                                 {q.siempreCount >= 0 && (
+                                    <span className="text-blue-700">Siempre: {q.siempre}%</span>
+                                 )}
+                                 {q.aVecesCount >= 0 && (
+                                    <span className="text-amber-700">A veces: {q.aVeces}%</span>
+                                 )}
+                                 {q.nuncaCount >= 0 && (
+                                    <span className="text-slate-600">Nunca: {q.nunca}%</span>
+                                 )}
+                              </div>
                            </div>
-                           <div className="w-12 text-right font-bold text-blue-700 ml-3 text-lg">{q.siempre}%</div>
                         </div>
                      ))}
                   </div>
                </div>
             )}
 
-            {/* Slide 5: Ranking de Áreas */}
-            {currentSlide === 5 && (
-               <div className="w-full max-w-6xl animate-fade-in flex flex-col h-full max-h-full">
-                   <h2 className="text-3xl font-black text-slate-800 mb-6 border-l-8 border-yellow-500 pl-4 flex items-center gap-3">
+            {/* Slide 4: Ranking de Áreas (Was Slide 5) */}
+            {currentSlide === 4 && (
+               <div className="w-full max-w-6xl flex flex-col h-full max-h-full">
+                   <h2 className="text-3xl font-black text-slate-800 mb-6 border-l-8 border-yellow-500 pl-4 flex items-center gap-3 flex-shrink-0">
                       Ranking Global por Áreas 
                       <Trophy className="w-8 h-8 text-yellow-500" />
                    </h2>
@@ -1469,6 +1492,9 @@ const ResultsView: React.FC<ResultsViewProps> = ({ onBack }) => {
                            </div>
                         ) : (
                            areaRanking.map((item, index) => {
+                              // Highlight Selected Area
+                              const isSelected = item.name === selectedArea;
+
                               // Colores para los primeros 3 lugares
                               let rankColor = "bg-slate-100 border-slate-200 text-slate-600";
                               let barColor = "bg-slate-400";
@@ -1487,19 +1513,28 @@ const ResultsView: React.FC<ResultsViewProps> = ({ onBack }) => {
                                  barColor = "bg-orange-500";
                                  icon = <Medal className="w-5 h-5 text-orange-600" />;
                               }
+                              
+                              // Override if selected to highlight
+                              if (isSelected) {
+                                 rankColor = "bg-blue-50 border-blue-300 text-blue-900 ring-2 ring-blue-500 shadow-md transform scale-[1.01]";
+                                 if (index > 2) barColor = "bg-blue-600";
+                              }
 
                               return (
-                                 <div key={item.name} className={`p-3 rounded-lg border flex items-center gap-3 shadow-sm ${rankColor}`}>
+                                 <div key={item.name} className={`p-3 rounded-lg border flex items-center gap-3 shadow-sm transition-all duration-300 ${rankColor}`}>
                                     <div className="w-8 h-8 flex items-center justify-center font-black text-xl opacity-50">
                                        #{index + 1}
                                     </div>
                                     <div className="flex-grow">
                                        <div className="flex justify-between items-end mb-1">
-                                          <h4 className="font-bold text-base leading-none">{item.name}</h4>
+                                          <h4 className="font-bold text-base leading-none flex items-center gap-2">
+                                             {item.name}
+                                             {isSelected && <span className="text-[10px] bg-blue-600 text-white px-1.5 rounded-full uppercase tracking-wider">Tú</span>}
+                                          </h4>
                                           {icon}
                                        </div>
                                        <div className="w-full bg-white/50 rounded-full h-3 overflow-hidden">
-                                          <div className={`h-full rounded-full ${barColor}`} style={{ width: `${(item.score * 10)}%` }}></div>
+                                          <div className={`h-full rounded-full ${barColor} transition-all duration-1000 ease-out`} style={{ width: `${(item.score * 10)}%` }}></div>
                                        </div>
                                     </div>
                                     <div className="text-right min-w-[60px]">
@@ -1514,10 +1549,12 @@ const ResultsView: React.FC<ResultsViewProps> = ({ onBack }) => {
                    </div>
                </div>
             )}
+            
+             </div> {/* End Animated Wrapper */}
           </div>
 
           {/* Navigation Controls Footer */}
-          <div className="h-16 border-t border-slate-200 bg-slate-50 flex items-center justify-between px-8 relative">
+          <div className="h-16 border-t border-slate-200 bg-white flex items-center justify-between px-8 relative z-20 flex-shrink-0">
              <div className="text-slate-400 font-bold text-xs">
                 CVDirecto Analytics
              </div>
@@ -1526,7 +1563,7 @@ const ResultsView: React.FC<ResultsViewProps> = ({ onBack }) => {
                 <button 
                   onClick={prevSlide}
                   disabled={currentSlide === 0}
-                  className="p-2 rounded-full bg-white border border-slate-300 shadow hover:bg-slate-100 disabled:opacity-30 transition-all"
+                  className="p-2 rounded-full bg-slate-50 border border-slate-200 shadow hover:bg-slate-100 disabled:opacity-30 transition-all"
                 >
                    <ChevronLeft className="w-5 h-5 text-slate-700" />
                 </button>
